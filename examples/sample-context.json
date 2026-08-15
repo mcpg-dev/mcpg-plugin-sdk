@@ -1,0 +1,20 @@
+{
+  "request_id": "test-req-00000000",
+  "session_id": "test-sess-abc",
+  "tool_name": "your.tool",
+  "surface": "tool",
+  "transport": "http",
+  "identity": {
+    "kind": "verified",
+    "trust_level": "verified",
+    "subject_id": "user@example.com",
+    "auth_provider": "oidc",
+    "issuer": "https://accounts.example.com",
+    "roles": ["reader", "writer"],
+    "groups": ["engineering"],
+    "scopes": ["mcp:tools:call"],
+    "attributes": {
+      "tenant_id": "acme-prod"
+    }
+  }
+}
