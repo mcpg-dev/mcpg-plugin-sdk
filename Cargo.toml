@@ -1,6 +1,6 @@
 [package]
 name = "mcpg-plugin-sdk"
-version = "0.1.0-beta.13"
+version = "0.1.0-beta.14"
 license = "Apache-2.0"
 edition = "2024"
 description = "Developer SDK for building MCPG plugins — testing harness, project templates, and utilities"
@@ -41,8 +41,8 @@ streaming = ["dep:tokio", "futures-core"]
 cluster-forward = ["dep:tokio", "futures-core"]
 
 [dependencies]
-mcpg-plugin-protocol = { git = "https://github.com/mcpg-dev/mcpg-plugin-protocol", tag = "v0.1.0-beta.13", version = "=0.1.0-beta.13" }
-mcpg-cluster-api = { git = "https://github.com/mcpg-dev/mcpg-cluster-api", tag = "v0.1.0-beta.13", version = "=0.1.0-beta.13" }
+mcpg-plugin-protocol = { git = "https://github.com/mcpg-dev/mcpg-plugin-protocol", tag = "v0.1.0-beta.14", version = "=0.1.0-beta.14" }
+mcpg-cluster-api = { git = "https://github.com/mcpg-dev/mcpg-cluster-api", tag = "v0.1.0-beta.14", version = "=0.1.0-beta.14" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 # Decode the base64 cache_get wire payload (host base64-encodes the bytes).
@@ -78,7 +78,7 @@ async-trait = "0.1"
 # Optional — only pulled in when the consumer enables
 # `static-firstparty`. Hosts the `FirstPartyRegistrar` that
 # `declare_plugin!`'s `register_static()` expansion references.
-mcpg-plugin-host = { git = "https://github.com/mcpg-dev/mcpg-plugin-host", tag = "v0.1.0-beta.13", version = "=0.1.0-beta.13", optional = true }
+mcpg-plugin-host = { git = "https://github.com/mcpg-dev/mcpg-plugin-host", tag = "v0.1.0-beta.14", version = "=0.1.0-beta.14", optional = true }
 anyhow = { version = "1.0", optional = true }
 
 [dev-dependencies]
