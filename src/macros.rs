@@ -4375,6 +4375,33 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
             })
         }
 
+        extern "C" fn __mcpg_cluster_kv_incr(
+            h: ::mcpg_plugin_protocol::abi::RPluginHandle,
+            args_json: $crate::abi_stable::std_types::RString,
+        ) -> $crate::abi_stable::std_types::RString {
+            ::mcpg_plugin_protocol::abi::catch_panic_to_empty_rstring(|| {
+                let p: &$ty = unsafe { $crate::ffi::typed_handle(h) };
+                let args: ::mcpg_cluster_api::KvIncrArgs =
+                    match ::serde_json::from_str(args_json.as_str()) {
+                        Ok(a) => a,
+                        Err(e) => {
+                            return ::mcpg_plugin_protocol::result_envelope::respond_err_rstring(
+                                &::mcpg_cluster_api::ClusterError::InvalidReference {
+                                    message: format!("malformed kv_incr args: {e}"),
+                                },
+                            );
+                        }
+                    };
+                let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_incr(
+                    p,
+                    &args.key,
+                    args.delta,
+                    args.ttl_ms,
+                );
+                ::mcpg_plugin_protocol::result_envelope::respond_result_rstring(&r)
+            })
+        }
+
         extern "C" fn __mcpg_cluster_shutdown(h: ::mcpg_plugin_protocol::abi::RPluginHandle) {
             ::mcpg_plugin_protocol::abi::catch_panic_silent(|| {
                 let p: &$ty = unsafe { $crate::ffi::typed_handle(h) };
@@ -4409,6 +4436,7 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
                 kv_delete: __mcpg_cluster_kv_delete,
                 kv_list_prefix: __mcpg_cluster_kv_list_prefix,
                 kv_expire: __mcpg_cluster_kv_expire,
+                kv_incr: __mcpg_cluster_kv_incr,
                 shutdown: __mcpg_cluster_shutdown,
                 drop_instance: __mcpg_cluster_drop,
             }

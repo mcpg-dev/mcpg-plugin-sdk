@@ -938,8 +938,8 @@ pub trait SyncClusterBackend: Send + Sync + 'static {
     ///   `Err(...)`      → backend failure
     ///
     /// Default impl delegates to `acquire_leadership`. Backends
-    /// with native non-blocking acquire override (Consul `?cas=`,
-    /// etcd lease+txn, JetStream KV CAS).
+    /// with native non-blocking acquire override (JetStream KV CAS,
+    /// redis SETNX).
     fn try_acquire_leadership(
         &self,
         role: &str,
@@ -975,7 +975,7 @@ pub trait SyncClusterBackend: Send + Sync + 'static {
     // implement these by blocking on their own runtime, mirroring the async
     // `KeyValueStore` trait the host consumes via `key_value_store()`. The
     // default impls return a `Precondition` error so coordinators that
-    // advertise no `kv` role (consul / etcd) compile unchanged — the host
+    // advertise no `kv` role compile unchanged — the host
     // never routes KV to them (it gates `key_value_store()` on the `kv`
     // role). `ttl_ms` is whole milliseconds; `None` == no TTL.
 
@@ -1016,6 +1016,13 @@ pub trait SyncClusterBackend: Send + Sync + 'static {
     }
     /// Update only the TTL of an existing key. `Ok(false)` when absent.
     fn kv_expire(&self, _key: &str, _ttl_ms: Option<u64>) -> Result<bool, ClusterError> {
+        Err(kv_unsupported())
+    }
+    /// Atomically add `delta` to the ASCII base-10 counter under `key`
+    /// and return the post-increment value. A missing key starts at 0.
+    /// `ttl_ms` (when Some) re-arms the key's TTL on every call
+    /// (sliding); `None` leaves any existing expiry unchanged.
+    fn kv_incr(&self, _key: &str, _delta: i64, _ttl_ms: Option<u64>) -> Result<i64, ClusterError> {
         Err(kv_unsupported())
     }
 

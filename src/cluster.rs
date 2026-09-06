@@ -5,7 +5,7 @@
 //! # Why sync (not async) on the SDK side
 //!
 //! The host-side `ClusterBackend` trait is async — backends do
-//! real I/O (Raft RPC, JetStream KV, Consul HTTP). But the SDK
+//! real I/O (Raft RPC, JetStream KV). But the SDK
 //! `ClusterClient` is invoked from inside a `SyncIdentityResolver`
 //! / `SyncPolicyEngine` impl, which runs on a host blocking-thread
 //! after the gateway hands the FFI call off via `spawn_blocking`.
@@ -119,8 +119,8 @@ impl ClusterClient {
 
     /// Publish a notification to a topic. Fire-and-forget; the
     /// coordinator's delivery semantics are backend-specific
-    /// (NATS JetStream → at-least-once; Consul events → best
-    /// effort; etcd watch → at-least-once via key bumps).
+    /// (NATS JetStream → at-least-once; redis PUBLISH →
+    /// best-effort, at-most-once).
     pub fn publish(
         &self,
         topic: &str,

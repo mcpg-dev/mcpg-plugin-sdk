@@ -1,6 +1,6 @@
 [package]
 name = "mcpg-plugin-sdk"
-version = "0.1.0-beta.18"
+version = "0.1.0-beta.21"
 license = "Apache-2.0"
 edition = "2024"
 description = "Developer SDK for building MCPG plugins — testing harness, project templates, and utilities"
@@ -37,12 +37,12 @@ streaming = ["dep:tokio", "futures-core"]
 # The shared `ffi::cluster_forward` helper that bridges a
 # cluster pub/sub / peer-watch async stream into the host's synchronous
 # `emit_event` FFI callback (with a use-after-free guard). The
-# cdylib cluster_backend plugins (consul / etcd / redis / nats) enable this.
+# cdylib cluster_backend plugins (redis / nats) enable this.
 cluster-forward = ["dep:tokio", "futures-core"]
 
 [dependencies]
-mcpg-plugin-protocol = { git = "https://github.com/mcpg-dev/mcpg-plugin-protocol", tag = "v0.1.0-beta.18", version = "=0.1.0-beta.18" }
-mcpg-cluster-api = { git = "https://github.com/mcpg-dev/mcpg-cluster-api", tag = "v0.1.0-beta.18", version = "=0.1.0-beta.18" }
+mcpg-plugin-protocol = { git = "https://github.com/mcpg-dev/mcpg-plugin-protocol", tag = "v0.1.0-beta.21", version = "=0.1.0-beta.21" }
+mcpg-cluster-api = { git = "https://github.com/mcpg-dev/mcpg-cluster-api", tag = "v0.1.0-beta.21", version = "=0.1.0-beta.21" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 # Decode the base64 cache_get wire payload (host base64-encodes the bytes).
@@ -78,7 +78,7 @@ async-trait = "0.1"
 # Optional — only pulled in when the consumer enables
 # `static-firstparty`. Hosts the `FirstPartyRegistrar` that
 # `declare_plugin!`'s `register_static()` expansion references.
-mcpg-plugin-host = { git = "https://github.com/mcpg-dev/mcpg-plugin-host", tag = "v0.1.0-beta.19", version = "=0.1.0-beta.19", optional = true }
+mcpg-plugin-host = { git = "https://github.com/mcpg-dev/mcpg-plugin-host", tag = "v0.1.0-beta.22", version = "=0.1.0-beta.22", optional = true }
 anyhow = { version = "1.0", optional = true }
 
 [dev-dependencies]
