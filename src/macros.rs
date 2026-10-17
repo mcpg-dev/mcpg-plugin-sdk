@@ -1025,6 +1025,26 @@ macro_rules! __mcpg_decl_watch_strategy_entity {
             })
         }
 
+        extern "C" fn __mcpg_watch_acknowledge(
+            handle: ::mcpg_plugin_protocol::abi::RPluginHandle,
+            cancel_token: usize,
+            position_json: $crate::abi_stable::std_types::RString,
+        ) {
+            ::mcpg_plugin_protocol::abi::catch_panic_silent(|| {
+                let Ok(position) =
+                    ::serde_json::from_str::<::serde_json::Value>(position_json.as_str())
+                else {
+                    return;
+                };
+                let plugin: &$ty = unsafe { $crate::ffi::typed_handle(handle) };
+                <$ty as $crate::ffi::SyncWatchStrategyPlugin>::acknowledge(
+                    plugin,
+                    &$crate::ffi::WatchHandleBox(cancel_token as *mut ()),
+                    &position,
+                );
+            })
+        }
+
         extern "C" fn __mcpg_watch_shutdown(handle: ::mcpg_plugin_protocol::abi::RPluginHandle) {
             ::mcpg_plugin_protocol::abi::catch_panic_silent(|| {
                 let plugin: &$ty = unsafe { $crate::ffi::typed_handle(handle) };
@@ -1043,6 +1063,7 @@ macro_rules! __mcpg_decl_watch_strategy_entity {
                 kind: __mcpg_watch_kind,
                 watch: __mcpg_watch_watch,
                 cancel: __mcpg_watch_cancel,
+                acknowledge: __mcpg_watch_acknowledge,
                 shutdown: __mcpg_watch_shutdown,
                 drop_instance: __mcpg_watch_drop,
             }
@@ -4233,9 +4254,12 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
                             );
                         }
                     };
-                let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_get(p, &args.key).map(|opt| {
-                    opt.map(|entry| ::mcpg_cluster_api::KvEntryWire::from_entry(&entry))
-                });
+                let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_get_in(
+                    p,
+                    args.store.as_deref(),
+                    &args.key,
+                )
+                .map(|opt| opt.map(|entry| ::mcpg_cluster_api::KvEntryWire::from_entry(&entry)));
                 ::mcpg_plugin_protocol::result_envelope::respond_result_rstring(&r)
             })
         }
@@ -4257,8 +4281,9 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
                             );
                         }
                     };
-                let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_put(
+                let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_put_in(
                     p,
+                    args.store.as_deref(),
                     &args.key,
                     args.value,
                     args.ttl_ms,
@@ -4284,8 +4309,9 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
                             );
                         }
                     };
-                let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_put_if_absent(
+                let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_put_if_absent_in(
                     p,
+                    args.store.as_deref(),
                     &args.key,
                     args.value,
                     args.ttl_ms,
@@ -4311,7 +4337,11 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
                             );
                         }
                     };
-                let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_delete(p, &args.key);
+                let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_delete_in(
+                    p,
+                    args.store.as_deref(),
+                    &args.key,
+                );
                 ::mcpg_plugin_protocol::result_envelope::respond_result_rstring(&r)
             })
         }
@@ -4334,8 +4364,9 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
                         }
                     };
                 let limit = usize::try_from(args.limit).unwrap_or(usize::MAX);
-                let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_list_prefix(
+                let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_list_prefix_in(
                     p,
+                    args.store.as_deref(),
                     &args.prefix,
                     limit,
                 )
@@ -4369,8 +4400,12 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
                             );
                         }
                     };
-                let r =
-                    <$ty as $crate::ffi::SyncClusterBackend>::kv_expire(p, &args.key, args.ttl_ms);
+                let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_expire_in(
+                    p,
+                    args.store.as_deref(),
+                    &args.key,
+                    args.ttl_ms,
+                );
                 ::mcpg_plugin_protocol::result_envelope::respond_result_rstring(&r)
             })
         }
@@ -4392,8 +4427,9 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
                             );
                         }
                     };
-                let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_incr(
+                let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_incr_in(
                     p,
+                    args.store.as_deref(),
                     &args.key,
                     args.delta,
                     args.ttl_ms,

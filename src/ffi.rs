@@ -656,6 +656,11 @@ pub trait SyncWatchStrategyPlugin: Send + Sync + 'static {
     /// returned in `watch()`.
     fn cancel(&self, watch_handle: WatchHandleBox);
 
+    /// The host is done with the event of `watch_handle` whose
+    /// `upstream_cursor` is `position`; see
+    /// [`mcpg_plugin_protocol::WatchHandle::acknowledge`]. Returns at once.
+    fn acknowledge(&self, _watch_handle: &WatchHandleBox, _position: &Value) {}
+
     fn shutdown(&self) {}
 }
 
@@ -1024,6 +1029,76 @@ pub trait SyncClusterBackend: Send + Sync + 'static {
     /// (sliding); `None` leaves any existing expiry unchanged.
     fn kv_incr(&self, _key: &str, _delta: i64, _ttl_ms: Option<u64>) -> Result<i64, ClusterError> {
         Err(kv_unsupported())
+    }
+
+    // -- The same, on a store of its own --
+    //
+    // The host names `store` for state that must not share the bounded
+    // store above (`ClusterBackend::key_value_store_named`). A coordinator
+    // with one keyspace keeps these defaults, which use the shared store.
+
+    /// [`Self::kv_get`] on the store named `store`.
+    fn kv_get_in(&self, store: Option<&str>, key: &str) -> Result<Option<Entry>, ClusterError> {
+        let _ = store;
+        self.kv_get(key)
+    }
+    /// [`Self::kv_put`] on the store named `store`.
+    fn kv_put_in(
+        &self,
+        store: Option<&str>,
+        key: &str,
+        value: Vec<u8>,
+        ttl_ms: Option<u64>,
+    ) -> Result<(), ClusterError> {
+        let _ = store;
+        self.kv_put(key, value, ttl_ms)
+    }
+    /// [`Self::kv_put_if_absent`] on the store named `store`.
+    fn kv_put_if_absent_in(
+        &self,
+        store: Option<&str>,
+        key: &str,
+        value: Vec<u8>,
+        ttl_ms: Option<u64>,
+    ) -> Result<bool, ClusterError> {
+        let _ = store;
+        self.kv_put_if_absent(key, value, ttl_ms)
+    }
+    /// [`Self::kv_delete`] on the store named `store`.
+    fn kv_delete_in(&self, store: Option<&str>, key: &str) -> Result<bool, ClusterError> {
+        let _ = store;
+        self.kv_delete(key)
+    }
+    /// [`Self::kv_list_prefix`] on the store named `store`.
+    fn kv_list_prefix_in(
+        &self,
+        store: Option<&str>,
+        prefix: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, Entry)>, ClusterError> {
+        let _ = store;
+        self.kv_list_prefix(prefix, limit)
+    }
+    /// [`Self::kv_expire`] on the store named `store`.
+    fn kv_expire_in(
+        &self,
+        store: Option<&str>,
+        key: &str,
+        ttl_ms: Option<u64>,
+    ) -> Result<bool, ClusterError> {
+        let _ = store;
+        self.kv_expire(key, ttl_ms)
+    }
+    /// [`Self::kv_incr`] on the store named `store`.
+    fn kv_incr_in(
+        &self,
+        store: Option<&str>,
+        key: &str,
+        delta: i64,
+        ttl_ms: Option<u64>,
+    ) -> Result<i64, ClusterError> {
+        let _ = store;
+        self.kv_incr(key, delta, ttl_ms)
     }
 
     fn shutdown(&self) {}

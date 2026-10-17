@@ -35,6 +35,8 @@ pub mod config;
 pub mod declare_plugin;
 pub mod ffi;
 pub mod host_handle;
+pub mod inventory;
+pub mod queue;
 #[macro_use]
 pub mod macros;
 pub mod sql_guard;

@@ -49,35 +49,66 @@ pub fn spawn_polling_watch<F>(
     resource_uri: &str,
     interval: Duration,
     emit_event: Box<dyn Fn(&str) + Send + Sync + 'static>,
-    mut poll: F,
+    poll: F,
 ) -> WatchHandleBox
 where
     F: FnMut() -> Result<Option<String>, String> + Send + 'static,
+{
+    spawn_diffing_watch(resource_uri, interval, emit_event, poll, |_, _| {
+        vec![WatchEvent::default()]
+    })
+}
+
+/// [`spawn_polling_watch`] for a poll that can tell what changed. `poll`
+/// returns the current state; when it differs from the last one, an MCP
+/// Events source gets the events `diff` makes of the two, in order. A
+/// resource watch, on any other URI, gets one bare change instead.
+pub fn spawn_diffing_watch<S, F, D>(
+    resource_uri: &str,
+    interval: Duration,
+    emit_event: Box<dyn Fn(&str) + Send + Sync + 'static>,
+    mut poll: F,
+    diff: D,
+) -> WatchHandleBox
+where
+    S: PartialEq + Send + 'static,
+    F: FnMut() -> Result<Option<S>, String> + Send + 'static,
+    D: Fn(&S, &S) -> Vec<WatchEvent> + Send + 'static,
 {
     let stop = Arc::new(AtomicBool::new(false));
     let stop_thread = Arc::clone(&stop);
     let uri = resource_uri.to_owned();
     let interval = interval.max(MIN_INTERVAL);
-    // The change signal carries no per-event payload: the host already knows
-    // which resource_uri this watcher is bound to, so a default WatchEvent is
-    // "the watched collection changed". Not session/user-scoped (a backend
-    // poll is not tied to an MCP session).
+    let event_source = mcpg_plugin_protocol::is_event_source(resource_uri);
+    // A bare change carries no payload: the host already knows which
+    // resource_uri this watcher is bound to, so a default WatchEvent is "the
+    // watched collection changed". Not session/user-scoped (a backend poll is
+    // not tied to an MCP session).
     let event_json =
         serde_json::to_string(&WatchEvent::default()).unwrap_or_else(|_| "{}".to_owned());
 
     let join = std::thread::Builder::new()
         .name("mcpg-poll-watch".to_owned())
         .spawn(move || {
-            let mut last: Option<String> = None;
+            let mut last: Option<S> = None;
             while !stop_thread.load(Ordering::Relaxed) {
                 match poll() {
                     Ok(Some(cur)) => match &last {
                         // Baseline: remember without firing.
                         None => last = Some(cur),
-                        // Advance: the tracked scalar moved → signal a change.
+                        // Advance: the tracked state moved → signal a change.
                         Some(prev) if *prev != cur => {
+                            if event_source {
+                                for event in diff(prev, &cur) {
+                                    match serde_json::to_string(&event) {
+                                        Ok(json) => emit_event(&json),
+                                        Err(e) => tracing::warn!(resource_uri = %uri, error = %e, "polling watch: event not serialisable"),
+                                    }
+                                }
+                            } else {
+                                emit_event(&event_json);
+                            }
                             last = Some(cur);
-                            emit_event(&event_json);
                         }
                         _ => {}
                     },
@@ -170,6 +201,41 @@ mod tests {
             2,
             "exactly two distinct advances emit"
         );
+    }
+
+    /// An event source gets the diff's events; a resource watch one bare
+    /// change per advance.
+    #[test]
+    fn a_diffing_watch_emits_its_events_only_to_an_event_source() {
+        for (uri, expected) in [
+            (
+                "mcpg-event://numbers",
+                vec![r#"{"event_id":"1->2"}"#.to_owned()],
+            ),
+            ("res://numbers", vec!["{}".to_owned()]),
+        ] {
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let seen_c = Arc::clone(&seen);
+            let emit: Box<dyn Fn(&str) + Send + Sync> =
+                Box::new(move |json| seen_c.lock().unwrap().push(json.to_owned()));
+            // A baseline of 1, then 2 for good.
+            let mut ticks = [1u32].into_iter();
+            let handle = spawn_diffing_watch(
+                uri,
+                Duration::from_millis(250),
+                emit,
+                move || Ok(Some(ticks.next().unwrap_or(2))),
+                |prev: &u32, cur: &u32| {
+                    vec![WatchEvent {
+                        event_id: Some(format!("{prev}->{cur}")),
+                        ..WatchEvent::default()
+                    }]
+                },
+            );
+            std::thread::sleep(Duration::from_millis(900));
+            cancel_polling_watch(handle);
+            assert_eq!(*seen.lock().unwrap(), expected, "{uri}");
+        }
     }
 
     #[test]
