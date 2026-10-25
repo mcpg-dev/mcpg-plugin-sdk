@@ -4364,6 +4364,17 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
                         }
                     };
                 let limit = usize::try_from(args.limit).unwrap_or(usize::MAX);
+                if args.page {
+                    let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_list_page_in(
+                        p,
+                        args.store.as_deref(),
+                        &args.prefix,
+                        args.cursor.as_deref(),
+                        limit,
+                    )
+                    .map(|page| ::mcpg_cluster_api::KvPageWire::from_page(&page));
+                    return ::mcpg_plugin_protocol::result_envelope::respond_result_rstring(&r);
+                }
                 let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_list_prefix_in(
                     p,
                     args.store.as_deref(),

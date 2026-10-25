@@ -21,7 +21,7 @@
 //! but the macro-generated entry points guarantee the type matches, so
 //! plugin authors never call these directly.
 
-use mcpg_cluster_api::{ClusterError, ClusterNodeInfo, ClusterPeer, Entry};
+use mcpg_cluster_api::{ClusterError, ClusterNodeInfo, ClusterPeer, Entry, KvPage};
 use mcpg_plugin_protocol::abi::RPluginHandle;
 use mcpg_plugin_protocol::approval_notifier::{
     NotificationError, NotificationRequest, NotificationResult,
@@ -1011,13 +1011,27 @@ pub trait SyncClusterBackend: Send + Sync + 'static {
     fn kv_delete(&self, _key: &str) -> Result<bool, ClusterError> {
         Err(kv_unsupported())
     }
-    /// List up to `limit` `(key, entry)` pairs under `prefix`.
-    fn kv_list_prefix(
+    /// One page of the live `(key, entry)` pairs under `prefix`, after
+    /// `cursor` (see `KeyValueStore::list_page` for the pass contract).
+    fn kv_list_page(
         &self,
         _prefix: &str,
+        _cursor: Option<&str>,
         _limit: usize,
-    ) -> Result<Vec<(String, Entry)>, ClusterError> {
+    ) -> Result<KvPage, ClusterError> {
         Err(kv_unsupported())
+    }
+    /// Up to `limit` `(key, entry)` pairs under `prefix`: the pages of
+    /// [`Self::kv_list_page`], cut at `limit`. Hosts that predate paging
+    /// call this.
+    fn kv_list_prefix(
+        &self,
+        prefix: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, Entry)>, ClusterError> {
+        collect_pages(limit, |cursor, want| {
+            self.kv_list_page(prefix, cursor, want)
+        })
     }
     /// Update only the TTL of an existing key. `Ok(false)` when absent.
     fn kv_expire(&self, _key: &str, _ttl_ms: Option<u64>) -> Result<bool, ClusterError> {
@@ -1069,6 +1083,17 @@ pub trait SyncClusterBackend: Send + Sync + 'static {
         let _ = store;
         self.kv_delete(key)
     }
+    /// [`Self::kv_list_page`] on the store named `store`.
+    fn kv_list_page_in(
+        &self,
+        store: Option<&str>,
+        prefix: &str,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<KvPage, ClusterError> {
+        let _ = store;
+        self.kv_list_page(prefix, cursor, limit)
+    }
     /// [`Self::kv_list_prefix`] on the store named `store`.
     fn kv_list_prefix_in(
         &self,
@@ -1076,8 +1101,9 @@ pub trait SyncClusterBackend: Send + Sync + 'static {
         prefix: &str,
         limit: usize,
     ) -> Result<Vec<(String, Entry)>, ClusterError> {
-        let _ = store;
-        self.kv_list_prefix(prefix, limit)
+        collect_pages(limit, |cursor, want| {
+            self.kv_list_page_in(store, prefix, cursor, want)
+        })
     }
     /// [`Self::kv_expire`] on the store named `store`.
     fn kv_expire_in(
@@ -1110,6 +1136,27 @@ fn kv_unsupported() -> ClusterError {
     ClusterError::Unsupported {
         reason: "coordinator does not provide a key_value_store".into(),
     }
+}
+
+/// Up to `limit` entries from the pages `next_page(cursor, want)` returns.
+fn collect_pages(
+    limit: usize,
+    mut next_page: impl FnMut(Option<&str>, usize) -> Result<KvPage, ClusterError>,
+) -> Result<Vec<(String, Entry)>, ClusterError> {
+    let mut out = Vec::new();
+    let mut cursor: Option<String> = None;
+    while out.len() < limit {
+        let want = (limit - out.len()).min(mcpg_cluster_api::LIST_PAGE_SIZE);
+        let page = next_page(cursor.as_deref(), want)?;
+        let room = limit - out.len();
+        out.extend(page.entries.into_iter().take(room));
+        match page.next {
+            // A backend that hands back the cursor it got would loop.
+            Some(next) if cursor.as_deref() != Some(next.as_str()) => cursor = Some(next),
+            _ => break,
+        }
+    }
+    Ok(out)
 }
 
 /// Sync contract a cdylib `policy_engine` plugin implements.
