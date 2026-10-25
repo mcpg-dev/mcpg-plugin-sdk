@@ -3822,10 +3822,20 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
         ) -> $crate::abi_stable::std_types::RString {
             ::mcpg_plugin_protocol::abi::catch_panic_to_empty_rstring(|| {
                 let p: &$ty = unsafe { $crate::ffi::typed_handle(h) };
-                $crate::abi_stable::std_types::RString::from(
-                    ::serde_json::to_string(<$ty as $crate::ffi::SyncClusterBackend>::manifest(p))
-                        .unwrap_or_default(),
-                )
+                let manifest = <$ty as $crate::ffi::SyncClusterBackend>::manifest(p);
+                // The KV shims below read and answer base64 values: say so
+                // beside the manifest, where a host that predates it ignores it.
+                let json = match ::serde_json::to_value(manifest) {
+                    Ok(::serde_json::Value::Object(mut map)) => {
+                        map.insert(
+                            "wire_features".to_owned(),
+                            ::serde_json::json!([::mcpg_cluster_api::KV_VALUE_BASE64]),
+                        );
+                        ::serde_json::Value::Object(map).to_string()
+                    }
+                    _ => String::new(),
+                };
+                $crate::abi_stable::std_types::RString::from(json)
             })
         }
         extern "C" fn __mcpg_cluster_node_info(
@@ -4259,7 +4269,11 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
                     args.store.as_deref(),
                     &args.key,
                 )
-                .map(|opt| opt.map(|entry| ::mcpg_cluster_api::KvEntryWire::from_entry(&entry)));
+                .map(|opt| {
+                    opt.map(|entry| {
+                        ::mcpg_cluster_api::KvEntryWire::from_entry(&entry, args.base64)
+                    })
+                });
                 ::mcpg_plugin_protocol::result_envelope::respond_result_rstring(&r)
             })
         }
@@ -4285,7 +4299,7 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
                     p,
                     args.store.as_deref(),
                     &args.key,
-                    args.value,
+                    args.value.bytes,
                     args.ttl_ms,
                 );
                 ::mcpg_plugin_protocol::result_envelope::respond_result_rstring(&r)
@@ -4313,7 +4327,7 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
                     p,
                     args.store.as_deref(),
                     &args.key,
-                    args.value,
+                    args.value.bytes,
                     args.ttl_ms,
                 );
                 ::mcpg_plugin_protocol::result_envelope::respond_result_rstring(&r)
@@ -4372,7 +4386,7 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
                         args.cursor.as_deref(),
                         limit,
                     )
-                    .map(|page| ::mcpg_cluster_api::KvPageWire::from_page(&page));
+                    .map(|page| ::mcpg_cluster_api::KvPageWire::from_page(&page, args.base64));
                     return ::mcpg_plugin_protocol::result_envelope::respond_result_rstring(&r);
                 }
                 let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_list_prefix_in(
@@ -4386,7 +4400,7 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
                         .into_iter()
                         .map(|(key, entry)| ::mcpg_cluster_api::KvListEntryWire {
                             key,
-                            entry: ::mcpg_cluster_api::KvEntryWire::from_entry(&entry),
+                            entry: ::mcpg_cluster_api::KvEntryWire::from_entry(&entry, args.base64),
                         })
                         .collect::<Vec<_>>()
                 });
