@@ -3825,12 +3825,13 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
                 let manifest = <$ty as $crate::ffi::SyncClusterBackend>::manifest(p);
                 // The KV shims below read and answer base64 values: say so
                 // beside the manifest, where a host that predates it ignores it.
+                let mut features = vec![::mcpg_cluster_api::KV_VALUE_BASE64];
+                if <$ty as $crate::ffi::SyncClusterBackend>::declares_kv_incr_floor(p) {
+                    features.push(::mcpg_cluster_api::KV_INCR_FLOOR);
+                }
                 let json = match ::serde_json::to_value(manifest) {
                     Ok(::serde_json::Value::Object(mut map)) => {
-                        map.insert(
-                            "wire_features".to_owned(),
-                            ::serde_json::json!([::mcpg_cluster_api::KV_VALUE_BASE64]),
-                        );
+                        map.insert("wire_features".to_owned(), ::serde_json::json!(features));
                         ::serde_json::Value::Object(map).to_string()
                     }
                     _ => String::new(),
@@ -4452,13 +4453,23 @@ macro_rules! __mcpg_decl_cluster_backend_entity {
                             );
                         }
                     };
-                let r = <$ty as $crate::ffi::SyncClusterBackend>::kv_incr_in(
-                    p,
-                    args.store.as_deref(),
-                    &args.key,
-                    args.delta,
-                    args.ttl_ms,
-                );
+                let r = match args.floor {
+                    Some(floor) => <$ty as $crate::ffi::SyncClusterBackend>::kv_incr_floor_in(
+                        p,
+                        args.store.as_deref(),
+                        &args.key,
+                        args.delta,
+                        floor,
+                        args.ttl_ms,
+                    ),
+                    None => <$ty as $crate::ffi::SyncClusterBackend>::kv_incr_in(
+                        p,
+                        args.store.as_deref(),
+                        &args.key,
+                        args.delta,
+                        args.ttl_ms,
+                    ),
+                };
                 ::mcpg_plugin_protocol::result_envelope::respond_result_rstring(&r)
             })
         }

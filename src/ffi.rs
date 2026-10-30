@@ -1044,6 +1044,23 @@ pub trait SyncClusterBackend: Send + Sync + 'static {
     fn kv_incr(&self, _key: &str, _delta: i64, _ttl_ms: Option<u64>) -> Result<i64, ClusterError> {
         Err(kv_unsupported())
     }
+    /// `true` when [`Self::kv_incr_floor`] is implemented: the manifest then
+    /// lists `KV_INCR_FLOOR` under `wire_features`, and the host sends
+    /// `floor` to no coordinator whose manifest does not.
+    fn declares_kv_incr_floor(&self) -> bool {
+        false
+    }
+    /// Atomically raise the counter under `key` to at least `floor`, add
+    /// `delta`, and return the result (`KeyValueStore::incr_floor`).
+    fn kv_incr_floor(
+        &self,
+        _key: &str,
+        _delta: i64,
+        _floor: i64,
+        _ttl_ms: Option<u64>,
+    ) -> Result<i64, ClusterError> {
+        Err(kv_unsupported())
+    }
 
     // -- The same, on a store of its own --
     //
@@ -1125,6 +1142,18 @@ pub trait SyncClusterBackend: Send + Sync + 'static {
     ) -> Result<i64, ClusterError> {
         let _ = store;
         self.kv_incr(key, delta, ttl_ms)
+    }
+    /// [`Self::kv_incr_floor`] on the store named `store`.
+    fn kv_incr_floor_in(
+        &self,
+        store: Option<&str>,
+        key: &str,
+        delta: i64,
+        floor: i64,
+        ttl_ms: Option<u64>,
+    ) -> Result<i64, ClusterError> {
+        let _ = store;
+        self.kv_incr_floor(key, delta, floor, ttl_ms)
     }
 
     fn shutdown(&self) {}
