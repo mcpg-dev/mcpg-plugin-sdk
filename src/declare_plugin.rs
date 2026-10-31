@@ -125,13 +125,15 @@ macro_rules! declare_plugin {
         /// Cdylib entry point looked up by the host's dynamic loader.
         /// Returns one [`EntityRegistration`] per declared entity, in
         /// declaration order; variant is selected by each entity's
-        /// kind keyword.
+        /// kind keyword. It also sets the cdylib's `tracing` dispatcher,
+        /// which forwards the plugin's events to the host log.
         #[cfg(feature = "cdylib-export")]
         #[unsafe(no_mangle)]
         pub extern "C" fn mcpg_plugin_register()
             -> ::mcpg_plugin_protocol::abi::PluginRegistration
         {
             ::mcpg_plugin_protocol::abi::catch_panic_to_panicked_registration(|| {
+                $crate::plugin_log::install();
                 use $crate::abi_stable::std_types::{RString, RVec};
                 let mut entities: RVec<::mcpg_plugin_protocol::abi::EntityRegistration>
                     = RVec::new();

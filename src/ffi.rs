@@ -1445,8 +1445,13 @@ pub fn boxed_make_with_host<T, F>(
 where
     F: FnOnce(&str, crate::HostHandle) -> T,
 {
+    let host_ref = host.ffi_ref();
     let instance = factory(config_json, host);
-    Box::into_raw(Box::new(instance)) as RPluginHandle
+    let handle = Box::into_raw(Box::new(instance)) as RPluginHandle;
+    if let Some(host_ref) = host_ref {
+        crate::plugin_log::attach(handle, host_ref);
+    }
+    handle
 }
 
 /// Reclaim the box that [`boxed_make`] leaked.
@@ -1460,6 +1465,15 @@ where
 /// The macro-generated `drop_instance` slot upholds this contract by
 /// using the same `T` for both `boxed_make` and `boxed_drop`.
 pub unsafe fn boxed_drop<T>(handle: RPluginHandle) {
+    // The host frees the instance's bridge once this returns, so its handle
+    // leaves the log registry even when the instance's drop panics.
+    struct Detach(RPluginHandle);
+    impl Drop for Detach {
+        fn drop(&mut self) {
+            crate::plugin_log::detach(self.0);
+        }
+    }
+    let _detach = Detach(handle);
     // SAFETY: contract documented on this function.
     unsafe {
         drop(Box::from_raw(handle as *mut T));

@@ -39,6 +39,7 @@ pub mod inventory;
 pub mod queue;
 #[macro_use]
 pub mod macros;
+pub mod plugin_log;
 pub mod sql_guard;
 pub mod template;
 pub mod testing;

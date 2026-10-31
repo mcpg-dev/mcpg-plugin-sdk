@@ -327,6 +327,15 @@ impl HostHandle {
         }
     }
 
+    /// The FFI ref behind this handle; `None` for an in-process host.
+    pub(crate) fn ffi_ref(&self) -> Option<HostHandleRef> {
+        match &self.backend {
+            Backend::Ffi { handle_ref } => Some(*handle_ref),
+            #[cfg(feature = "static-firstparty")]
+            Backend::Services { .. } => None,
+        }
+    }
+
     /// Build a handle backed by an in-process [`HostServices`]
     /// implementation. Used by the static-firstparty registration
     /// path so plugins compiled directly into the gateway binary
