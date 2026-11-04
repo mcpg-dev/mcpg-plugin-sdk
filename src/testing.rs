@@ -943,7 +943,10 @@ pub fn stub_host_ref() -> mcpg_plugin_protocol::abi::HostHandleRef {
     extern "C" fn s_resolve_credentials(_ctx: usize, _v: RString, _id: RString) -> RString {
         RString::from(r#"{"ok":{"value":null,"count":0}}"#)
     }
-    extern "C" fn s_cache_get(_ctx: usize, _key: RString) -> RString {
+    extern "C" fn s_cache_get(_ctx: usize, _binding: RString, _key: RString) -> RString {
+        RString::from(r#"{"ok":null}"#)
+    }
+    extern "C" fn s_cache_put(_ctx: usize, _binding: RString, _args: RString) -> RString {
         RString::from(r#"{"ok":null}"#)
     }
     extern "C" fn s_fetch_content(_ctx: usize, _uri: RString) -> RString {
@@ -983,6 +986,7 @@ pub fn stub_host_ref() -> mcpg_plugin_protocol::abi::HostHandleRef {
             alias: s_alias,
             resolve_credentials: s_resolve_credentials,
             cache_get: s_cache_get,
+            cache_put: s_cache_put,
             fetch_content: s_fetch_content,
             store_content: s_store_content,
             invoke_tool: s_invoke_tool,

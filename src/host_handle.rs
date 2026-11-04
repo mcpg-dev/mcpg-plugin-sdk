@@ -133,10 +133,21 @@ impl mcpg_plugin_protocol::backend::BackendHost for HostHandleBackendHost {
 
     async fn cache_get(
         &self,
-        _ctx: &mcpg_plugin_protocol::backend::BackendInvocationContext,
+        ctx: &mcpg_plugin_protocol::backend::BackendInvocationContext,
         key: &str,
     ) -> Result<Option<bytes::Bytes>, BackendHostError> {
-        self.handle.cache_get(key)
+        self.handle.cache_get(&ctx.initiating_backend, key)
+    }
+
+    async fn cache_put(
+        &self,
+        ctx: &mcpg_plugin_protocol::backend::BackendInvocationContext,
+        key: String,
+        value: bytes::Bytes,
+        ttl: std::time::Duration,
+    ) -> Result<(), BackendHostError> {
+        self.handle
+            .cache_put(&ctx.initiating_backend, key, value, ttl)
     }
 
     async fn fetch_content(
@@ -474,12 +485,20 @@ impl HostHandle {
         }
     }
 
-    /// Look up a cached response by opaque hash key. `Ok(None)` on miss.
-    pub fn cache_get(&self, key: &str) -> Result<Option<bytes::Bytes>, BackendHostError> {
+    /// Look up a cached response by opaque hash key for `binding` (the
+    /// call's `initiating_backend`). `Ok(None)` on miss.
+    pub fn cache_get(
+        &self,
+        binding: &str,
+        key: &str,
+    ) -> Result<Option<bytes::Bytes>, BackendHostError> {
         match &self.backend {
             Backend::Ffi { handle_ref } => {
-                let out: RString =
-                    (handle_ref.vtable.cache_get)(handle_ref.ctx, RString::from(key));
+                let out: RString = (handle_ref.vtable.cache_get)(
+                    handle_ref.ctx,
+                    RString::from(binding),
+                    RString::from(key),
+                );
                 let b64 = decode_result_envelope::<Option<String>, BackendHostError>(out.as_str())
                     .map_err(envelope_err)??;
                 match b64 {
@@ -506,10 +525,54 @@ impl HostHandle {
             } => {
                 let services = services.clone();
                 let alias = alias.as_ref().to_owned();
+                let binding = binding.to_owned();
                 let key = key.to_owned();
                 block_on_or_err(
                     runtime,
-                    async move { services.cache_get(&alias, &key).await },
+                    async move { services.cache_get(&alias, &binding, &key).await },
+                    || BackendHostError::NotImplemented,
+                )
+            }
+        }
+    }
+
+    /// Store a response under `key` for `binding` (as for
+    /// [`Self::cache_get`]).
+    pub fn cache_put(
+        &self,
+        binding: &str,
+        key: String,
+        value: bytes::Bytes,
+        ttl: std::time::Duration,
+    ) -> Result<(), BackendHostError> {
+        match &self.backend {
+            Backend::Ffi { handle_ref } => {
+                let args = serde_json::json!({
+                    "key": key,
+                    "value": base64::engine::general_purpose::STANDARD.encode(&value),
+                    "ttl_ms": u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX),
+                });
+                let out: RString = (handle_ref.vtable.cache_put)(
+                    handle_ref.ctx,
+                    RString::from(binding),
+                    RString::from(serde_json::to_string(&args).unwrap_or_default()),
+                );
+                decode_result_envelope::<(), BackendHostError>(out.as_str())
+                    .map_err(envelope_err)?
+            }
+            #[cfg(feature = "static-firstparty")]
+            Backend::Services {
+                alias,
+                services,
+                runtime,
+                ..
+            } => {
+                let services = services.clone();
+                let alias = alias.as_ref().to_owned();
+                let binding = binding.to_owned();
+                block_on_or_err(
+                    runtime,
+                    async move { services.cache_put(&alias, &binding, key, value, ttl).await },
                     || BackendHostError::NotImplemented,
                 )
             }
