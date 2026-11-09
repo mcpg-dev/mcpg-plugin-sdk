@@ -4621,34 +4621,56 @@ macro_rules! __mcpg_decl_transport_entity {
                         }
                     };
                 let dispatcher = $crate::ffi::dispatcher_from_cb(dispatcher_cb);
-                match <$ty as $crate::ffi::SyncTransport>::start(p, &listener_config, dispatcher) {
-                    Ok(h) => {
-                        // Transports use the canonical `StreamHandle`
-                        // shape; the listen address (when present) lives in
-                        // `metadata_json` as `{"listen_address":"..."}`.
-                        let metadata_json = match h.listen_address {
-                            Some(addr) if !addr.is_empty() => {
-                                $crate::abi_stable::std_types::RString::from(
-                                    ::serde_json::to_string(
-                                        &::serde_json::json!({"listen_address": addr}),
-                                    )
-                                    .unwrap_or_default(),
-                                )
-                            }
-                            _ => $crate::abi_stable::std_types::RString::new(),
-                        };
-                        ::mcpg_plugin_protocol::abi::StreamHandle {
-                            handle: h.handle as usize,
-                            error_json: $crate::abi_stable::std_types::RString::new(),
-                            metadata_json,
-                        }
-                    }
-                    Err(e) => __mcpg_transport_start_err(e),
-                }
+                $crate::ffi::transport_start_handle(<$ty as $crate::ffi::SyncTransport>::start(
+                    p,
+                    &listener_config,
+                    dispatcher,
+                ))
             });
             result.unwrap_or_else(|_| {
                 __mcpg_transport_start_err(::mcpg_plugin_protocol::transport::TransportError::Io {
                     reason: "plugin panicked during start".into(),
+                })
+            })
+        }
+
+        extern "C" fn __mcpg_transport_wire(
+            h: ::mcpg_plugin_protocol::abi::RPluginHandle,
+        ) -> $crate::abi_stable::std_types::RString {
+            ::mcpg_plugin_protocol::abi::catch_panic_to_empty_rstring(|| {
+                let p: &$ty = unsafe { $crate::ffi::typed_handle(h) };
+                $crate::abi_stable::std_types::RString::from(
+                    <$ty as $crate::ffi::SyncTransport>::wire(p).as_str(),
+                )
+            })
+        }
+
+        extern "C" fn __mcpg_transport_start_http(
+            h: ::mcpg_plugin_protocol::abi::RPluginHandle,
+            listener_config_json: $crate::abi_stable::std_types::RString,
+            server: ::mcpg_plugin_protocol::abi::HttpServerRef,
+        ) -> ::mcpg_plugin_protocol::abi::StreamHandle {
+            let result = ::std::panic::catch_unwind(|| {
+                let p: &$ty = unsafe { $crate::ffi::typed_handle(h) };
+                let listener_config: ::serde_json::Value =
+                    match ::serde_json::from_str(listener_config_json.as_str()) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            return __mcpg_transport_start_err(
+                                ::mcpg_plugin_protocol::transport::TransportError::InvalidConfig {
+                                    message: format!("listener_config not JSON: {e}"),
+                                },
+                            );
+                        }
+                    };
+                let server = $crate::http_ingress::HttpIngressServer::from_ffi(server);
+                $crate::ffi::transport_start_handle(
+                    <$ty as $crate::ffi::SyncTransport>::start_http(p, &listener_config, server),
+                )
+            });
+            result.unwrap_or_else(|_| {
+                __mcpg_transport_start_err(::mcpg_plugin_protocol::transport::TransportError::Io {
+                    reason: "plugin panicked during start_http".into(),
                 })
             })
         }
@@ -4713,6 +4735,8 @@ macro_rules! __mcpg_decl_transport_entity {
                 transport_handle_close: __mcpg_transport_handle_close,
                 transport_handle_drop: __mcpg_transport_handle_drop,
                 transport_handle_listen_address: __mcpg_transport_handle_listen_address,
+                wire: __mcpg_transport_wire,
+                start_http: __mcpg_transport_start_http,
                 shutdown: __mcpg_transport_shutdown,
                 drop_instance: __mcpg_transport_drop,
             }

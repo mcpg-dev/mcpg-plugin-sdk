@@ -1549,7 +1549,65 @@ pub trait SyncTransport: Send + Sync + 'static {
     fn transport_handle_listen_address(&self, _transport_handle: WatchHandleBox) -> Option<String> {
         None
     }
+    /// What this transport hands the gateway. A transport that returns
+    /// `Http` implements [`Self::start_http`]; the host never calls its
+    /// [`Self::start`].
+    fn wire(&self) -> mcpg_plugin_protocol::transport::TransportWire {
+        mcpg_plugin_protocol::transport::TransportWire::Messages
+    }
+    /// Start an `http`-wire transport: hand every received request to
+    /// `server` and write its answer back to the client. The same handle
+    /// rules as [`Self::start`] apply; `listen_address` is the address
+    /// clients use (for a tunnel: its public URL). Every
+    /// [`crate::http_ingress::IngressResponse`] MUST be dropped before
+    /// [`Self::transport_handle_drop`] returns.
+    fn start_http(
+        &self,
+        _listener_config: &Value,
+        _server: crate::http_ingress::HttpIngressServer,
+    ) -> Result<SyncTransportHandle, TransportError> {
+        Err(TransportError::InvalidConfig {
+            message: format!(
+                "transport `{}` hands the gateway JSON-RPC messages, not HTTP requests",
+                self.name()
+            ),
+        })
+    }
     fn shutdown(&self) {}
+}
+
+/// The `StreamHandle` a transport's `start` / `start_http` slot returns.
+/// The SDK macro calls this; the listen address rides in `metadata_json`.
+#[doc(hidden)]
+#[must_use]
+pub fn transport_start_handle(
+    result: Result<SyncTransportHandle, TransportError>,
+) -> mcpg_plugin_protocol::abi::StreamHandle {
+    use abi_stable::std_types::RString;
+    match result {
+        Ok(h) if h.handle.is_null() => transport_start_handle(Err(TransportError::Io {
+            reason: "plugin returned a null transport handle".into(),
+        })),
+        Ok(h) => {
+            let metadata_json = match h.listen_address {
+                Some(addr) if !addr.is_empty() => RString::from(
+                    serde_json::to_string(&serde_json::json!({ "listen_address": addr }))
+                        .unwrap_or_default(),
+                ),
+                _ => RString::new(),
+            };
+            mcpg_plugin_protocol::abi::StreamHandle {
+                handle: h.handle as usize,
+                error_json: RString::new(),
+                metadata_json,
+            }
+        }
+        Err(e) => mcpg_plugin_protocol::abi::StreamHandle {
+            handle: 0,
+            error_json: RString::from(serde_json::to_string(&e).unwrap_or_default()),
+            metadata_json: RString::new(),
+        },
+    }
 }
 
 /// Sync contract the plugin calls per received MCP message to
