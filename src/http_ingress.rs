@@ -367,7 +367,7 @@ mod tests {
             uri: "/mcp".into(),
             headers: vec![("host".into(), "x.ngrok.app".into())],
             remote_addr: Some("203.0.113.7:4242".into()),
-            tls: None,
+            ..Default::default()
         };
         let mut resp = server(&host).serve(&head, b"{}".to_vec());
         let (sent_head, sent_body) = host.requests.lock().unwrap()[0].clone();
