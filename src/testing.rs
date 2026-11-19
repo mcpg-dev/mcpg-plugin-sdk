@@ -2040,8 +2040,7 @@ mod tests {
     // -- transport helper tests ---------------------------------------------
 
     use mcpg_plugin_protocol::transport::{
-        DispatchResponse, DispatcherError, MessageDispatcher, Transport, TransportError,
-        TransportHandle,
+        HttpIngressServer, Transport, TransportError, TransportHandle,
     };
 
     struct FixedTransport {
@@ -2057,10 +2056,10 @@ mod tests {
         fn name(&self) -> &str {
             &self.name
         }
-        async fn start(
+        async fn start_http(
             &self,
             _listener_config: &serde_json::Value,
-            _dispatcher: Arc<dyn MessageDispatcher>,
+            _server: Arc<dyn HttpIngressServer>,
         ) -> Result<Box<dyn TransportHandle>, TransportError> {
             Err(TransportError::Shutdown)
         }
@@ -2094,7 +2093,7 @@ mod tests {
     fn transport_binding_resolves_lookup() {
         let gw = MockGateway::new().with_transport(fixed_transport("dev.test.http", "http-v1"));
         assert!(gw.transport_by_name("http-v1").is_some());
-        assert!(gw.transport_by_name("stdio-v1").is_none());
+        assert!(gw.transport_by_name("tunnel-v1").is_none());
     }
 
     #[test]
@@ -2110,11 +2109,6 @@ mod tests {
     fn transport_binding_panics_on_empty_name() {
         MockGateway::new().with_transport(fixed_transport("dev.test.empty", ""));
     }
-
-    // Silence the unused-warning on DispatchResponse/DispatcherError
-    // — they're only referenced via the trait above.
-    #[allow(dead_code)]
-    fn _transport_type_refs(_: DispatchResponse, _: DispatcherError) {}
 
     // -- policy_engine helper tests -----------------------------------------
 

@@ -43,14 +43,13 @@ use mcpg_plugin_protocol::store::{
     AppendResult, StoreError, StorePageWire, StoreRole, StoreValueWire,
 };
 use mcpg_plugin_protocol::telemetry::{MetricPoint, SpanEnd, SpanStart, TelemetryError};
-use mcpg_plugin_protocol::transport::{DispatcherError, TransportError};
+use mcpg_plugin_protocol::transport::TransportError;
 use mcpg_plugin_protocol::types::PluginIdentity;
 use mcpg_plugin_protocol::{
     BackendError, BackendRequest, BackendResponse, CapabilitySet, GateDecision, IdentityResolution,
     PluginContext, PluginManifest, ResourcePage, TransformResult, WatchError,
 };
 use serde_json::Value;
-use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // http_route streaming support
@@ -1507,76 +1506,46 @@ pub unsafe fn typed_handle<'a, T>(handle: RPluginHandle) -> &'a T {
 // ---------------------------------------------------------------------------
 
 /// Sync contract a cdylib `transport` plugin implements. The
-/// plugin's accept loop runs on its own
-/// thread; per received message it calls
-/// `dispatcher.dispatch(session_id, bytes)` to route into the
-/// gateway + get reply bytes back.
-///
-/// Narrowing note: streaming dispatcher replies are not
-/// supported — the host surfaces
-/// `DispatcherError::Internal { reason: "streaming reply not
-/// supported across FFI" }` when the gateway would have returned
-/// a `DispatchResponse.stream`. SSE-capable transports stay
-/// static until that restriction is lifted.
+/// plugin's accept loop runs on its own threads; per received HTTP
+/// request it calls [`crate::http_ingress::HttpIngressServer::serve`]
+/// and writes the gateway's answer back to the client.
 pub trait SyncTransport: Send + Sync + 'static {
     fn manifest(&self) -> &PluginManifest;
-    /// Self-declared transport name (`"http-v1"`, `"stdio-v1"`,
-    /// …). Host refuses duplicate registrations.
+    /// Self-declared transport name (`"ngrok-v1"`, …). Host refuses
+    /// duplicate registrations.
     fn name(&self) -> &str;
-    /// Start accepting sessions. Returns a
-    /// [`SyncTransportHandle`] the plugin uses to track the
-    /// running listener; the macro marshals its fields into the
-    /// `StreamHandle` FFI wire shape (listen address lives in
-    /// `metadata_json`).
-    fn start(
-        &self,
-        listener_config: &Value,
-        dispatcher: Arc<dyn SyncMessageDispatcher>,
-    ) -> Result<SyncTransportHandle, TransportError>;
-    /// Stop accepting new sessions. `transport_handle` is the
-    /// opaque cookie the plugin minted in `start()`. Plugin
-    /// MUST return promptly; in-flight sessions may still drain
-    /// on the plugin's accept loop until `transport_handle_drop`.
-    fn transport_handle_close(&self, transport_handle: WatchHandleBox);
-    /// Free plugin-side transport state. After this returns,
-    /// the plugin MUST NOT call the dispatcher any further.
-    /// Host frees its own dispatcher bridge immediately after.
-    fn transport_handle_drop(&self, transport_handle: WatchHandleBox);
-    /// Return the transport's operator-visible listen address.
-    /// `None` for transports without a meaningful address (e.g.
-    /// stdio). Default returns `None`; plugins with a network
-    /// listener override.
-    fn transport_handle_listen_address(&self, _transport_handle: WatchHandleBox) -> Option<String> {
-        None
-    }
-    /// What this transport hands the gateway. A transport that returns
-    /// `Http` implements [`Self::start_http`]; the host never calls its
-    /// [`Self::start`].
-    fn wire(&self) -> mcpg_plugin_protocol::transport::TransportWire {
-        mcpg_plugin_protocol::transport::TransportWire::Messages
-    }
-    /// Start an `http`-wire transport: hand every received request to
-    /// `server` and write its answer back to the client. The same handle
-    /// rules as [`Self::start`] apply; `listen_address` is the address
-    /// clients use (for a tunnel: its public URL). Every
-    /// [`crate::http_ingress::IngressResponse`] MUST be dropped before
-    /// [`Self::transport_handle_drop`] returns.
+    /// Start accepting connections: hand every received request to
+    /// `server` and write its answer back to the client. Returns a
+    /// [`SyncTransportHandle`] the plugin uses to track the running
+    /// listener; the macro marshals its fields into the `StreamHandle`
+    /// FFI wire shape (listen address lives in `metadata_json`).
+    /// `listen_address` is the address clients use (for a tunnel: its
+    /// public URL). Every [`crate::http_ingress::IngressResponse`]
+    /// MUST be dropped before [`Self::transport_handle_drop`] returns.
     fn start_http(
         &self,
-        _listener_config: &Value,
-        _server: crate::http_ingress::HttpIngressServer,
-    ) -> Result<SyncTransportHandle, TransportError> {
-        Err(TransportError::InvalidConfig {
-            message: format!(
-                "transport `{}` hands the gateway JSON-RPC messages, not HTTP requests",
-                self.name()
-            ),
-        })
+        listener_config: &Value,
+        server: crate::http_ingress::HttpIngressServer,
+    ) -> Result<SyncTransportHandle, TransportError>;
+    /// Stop accepting new connections. `transport_handle` is the
+    /// opaque cookie the plugin minted in `start_http()`. Plugin
+    /// MUST return promptly; requests in flight may still drain
+    /// on the plugin's accept loop until `transport_handle_drop`.
+    fn transport_handle_close(&self, transport_handle: WatchHandleBox);
+    /// Free plugin-side transport state. After this returns, the
+    /// plugin MUST NOT call the server any further. Host frees its
+    /// own server bridge immediately after.
+    fn transport_handle_drop(&self, transport_handle: WatchHandleBox);
+    /// Return the transport's operator-visible listen address.
+    /// `None` for transports without a meaningful address. Default
+    /// returns `None`; plugins with a network listener override.
+    fn transport_handle_listen_address(&self, _transport_handle: WatchHandleBox) -> Option<String> {
+        None
     }
     fn shutdown(&self) {}
 }
 
-/// The `StreamHandle` a transport's `start` / `start_http` slot returns.
+/// The `StreamHandle` a transport's `start_http` slot returns.
 /// The SDK macro calls this; the listen address rides in `metadata_json`.
 #[doc(hidden)]
 #[must_use]
@@ -1610,15 +1579,7 @@ pub fn transport_start_handle(
     }
 }
 
-/// Sync contract the plugin calls per received MCP message to
-/// dispatch into the gateway. Implemented by the SDK macro
-/// against the incoming `DispatcherCallbackRef` — plugin
-/// authors only consume this trait, they never implement it.
-pub trait SyncMessageDispatcher: Send + Sync {
-    fn dispatch(&self, session_id: &str, message: &[u8]) -> Result<Vec<u8>, DispatcherError>;
-}
-
-/// Return value from `SyncTransport::start`. `handle` is an
+/// Return value from `SyncTransport::start_http`. `handle` is an
 /// opaque plugin-side cookie (cast to `*mut ()`); the host
 /// passes it back in the `transport_handle_*` vtable slots.
 pub struct SyncTransportHandle {
@@ -1632,60 +1593,6 @@ pub struct SyncTransportHandle {
 // handle wrap it in their own lock.
 unsafe impl Send for SyncTransportHandle {}
 unsafe impl Sync for SyncTransportHandle {}
-
-/// Build a `SyncMessageDispatcher` from the raw FFI callback.
-/// Called from the `declare_plugin!` macro's `transport` arm —
-/// plugin authors never invoke this directly.
-#[doc(hidden)]
-pub fn dispatcher_from_cb(
-    cb: mcpg_plugin_protocol::abi::DispatcherCallbackRef,
-) -> Arc<dyn SyncMessageDispatcher> {
-    Arc::new(FfiDispatcher { cb })
-}
-
-struct FfiDispatcher {
-    cb: mcpg_plugin_protocol::abi::DispatcherCallbackRef,
-}
-
-impl SyncMessageDispatcher for FfiDispatcher {
-    fn dispatch(&self, session_id: &str, message: &[u8]) -> Result<Vec<u8>, DispatcherError> {
-        // Wire form: host expects `{"bytes": Vec<u8>}` for
-        // message; returns `{"ok": {"bytes": Vec<u8>}}` or
-        // `{"err": DispatcherError}`.
-        let msg_json = serde_json::to_string(&serde_json::json!({
-            "bytes": message,
-        }))
-        .map_err(|e| DispatcherError::Internal {
-            reason: format!("dispatcher message encode failed: {e}"),
-        })?;
-        let result = (self.cb.dispatch)(
-            self.cb.ctx,
-            abi_stable::std_types::RString::from(session_id),
-            abi_stable::std_types::RString::from(msg_json),
-        );
-        #[derive(serde::Deserialize)]
-        struct ReplyWire {
-            bytes: Vec<u8>,
-        }
-        #[derive(serde::Deserialize)]
-        #[serde(untagged)]
-        enum Wire {
-            Ok { ok: ReplyWire },
-            Err { err: DispatcherError },
-        }
-        let raw = result.reply_json.as_str();
-        match serde_json::from_str::<Wire>(raw) {
-            Ok(Wire::Ok { ok }) => Ok(ok.bytes),
-            Ok(Wire::Err { err }) => Err(err),
-            Err(e) => Err(DispatcherError::Internal {
-                // Don't echo the raw reply body — it can carry sampled model
-                // content or solicited credential material. The serde error
-                // already names the position and expected shape.
-                reason: format!("dispatcher reply decode failed: {e}"),
-            }),
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Cluster pub/sub + peer-watch FFI forwarder

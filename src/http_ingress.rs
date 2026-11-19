@@ -1,6 +1,6 @@
-//! Plugin side of the `http` transport wire.
+//! Plugin side of a transport's HTTP ingress.
 //!
-//! An `http`-wire transport (see [`crate::ffi::SyncTransport::start_http`])
+//! A transport (see [`crate::ffi::SyncTransport::start_http`])
 //! receives HTTP requests somewhere the gateway cannot see (a tunnel, a
 //! relay) and hands each one to the gateway with
 //! [`HttpIngressServer::serve`]. The gateway answers through its own HTTP
@@ -27,7 +27,7 @@ use mcpg_plugin_protocol::transport::{HttpIngressRequestHead, HttpIngressRespons
 /// empty.
 pub const QUEUE_LIMIT_BYTES: usize = 1024 * 1024;
 
-/// The gateway's HTTP server, as an `http`-wire transport receives it in
+/// The gateway's HTTP server, as a transport receives it in
 /// `start_http`. Cheap to copy; usable from any thread.
 ///
 /// Every [`IngressResponse`] it returns MUST be dropped before the

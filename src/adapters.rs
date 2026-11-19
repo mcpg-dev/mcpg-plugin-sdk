@@ -1080,14 +1080,14 @@ mod content_store_kinds {
 pub use content_store_kinds::SyncContentStoreAdapter;
 
 // ===========================================================================
-// Follow-on adapters — http_route / message_dispatcher kinds.
+// Follow-on adapters — http_route kind.
 //
 // SyncTransport is deliberately NOT bridged here: the sync surface
-// returns a SyncTransportHandle (raw cookie + vtable methods) and consumes
-// Arc<dyn SyncMessageDispatcher> from its accept loop, while the async
-// Transport returns Box<dyn TransportHandle> with async listen_address/close
-// and consumes Arc<dyn MessageDispatcher>. Bridging requires both a
-// trait-object-across-FFI wrapper and a sync→async dispatcher lowering with
+// returns a SyncTransportHandle (raw cookie + vtable methods) and takes
+// the SDK's FFI-backed HttpIngressServer, while the async Transport
+// returns Box<dyn TransportHandle> with async listen_address/close and
+// takes Arc<dyn HttpIngressServer>. Bridging requires both a
+// trait-object-across-FFI wrapper and a sync→async server lowering with
 // runtime-handle plumbing — the same streaming-FFI gap that
 // SyncSecretProviderAdapter defers. Operators that need a first-party
 // Transport impl the async trait directly (no adapter) rather than relying
@@ -1096,15 +1096,13 @@ pub use content_store_kinds::SyncContentStoreAdapter;
 
 mod http_route_kinds {
     use async_trait::async_trait;
-    use bytes::Bytes;
 
     use mcpg_plugin_protocol::http_route::{
         HttpRoute, HttpRouteRequest, HttpRouteResponse, RouteSpec,
     };
     use mcpg_plugin_protocol::manifest::PluginManifest;
-    use mcpg_plugin_protocol::transport::{DispatchResponse, DispatcherError, MessageDispatcher};
 
-    use crate::ffi::{SyncHttpRoute, SyncMessageDispatcher};
+    use crate::ffi::SyncHttpRoute;
 
     // ---------------------------------------------------------------------------
     // HttpRoute
@@ -1153,52 +1151,8 @@ mod http_route_kinds {
             self.inner.shutdown();
         }
     }
-
-    // ---------------------------------------------------------------------------
-    // MessageDispatcher
-    // ---------------------------------------------------------------------------
-
-    /// Lifts a [`SyncMessageDispatcher`] implementation into the async
-    /// [`MessageDispatcher`] trait. Same pattern as
-    /// [`SyncToolGateAdapter`](crate::adapters::SyncToolGateAdapter).
-    /// Neither trait carries a manifest.
-    ///
-    /// `Bytes` (async) → `&[u8]` (sync) borrows the underlying slice
-    /// (zero copy). The sync reply `Vec<u8>` is wrapped as
-    /// `DispatchResponse::unary(Vec<u8>)`; `DispatchResponse::stream` is
-    /// unreachable from a sync dispatcher because no stream type exists on
-    /// the sync side.
-    #[repr(transparent)]
-    pub struct SyncMessageDispatcherAdapter<T: SyncMessageDispatcher + 'static> {
-        inner: T,
-    }
-
-    impl<T: SyncMessageDispatcher + 'static> SyncMessageDispatcherAdapter<T> {
-        pub fn new(inner: T) -> Self {
-            Self { inner }
-        }
-        pub fn inner(&self) -> &T {
-            &self.inner
-        }
-        pub fn into_inner(self) -> T {
-            self.inner
-        }
-    }
-
-    #[async_trait]
-    impl<T: SyncMessageDispatcher + 'static> MessageDispatcher for SyncMessageDispatcherAdapter<T> {
-        async fn dispatch(
-            &self,
-            session_id: &str,
-            message: Bytes,
-        ) -> Result<DispatchResponse, DispatcherError> {
-            self.inner
-                .dispatch(session_id, message.as_ref())
-                .map(DispatchResponse::unary)
-        }
-    }
 }
-pub use http_route_kinds::{SyncHttpRouteAdapter, SyncMessageDispatcherAdapter};
+pub use http_route_kinds::SyncHttpRouteAdapter;
 
 // ===========================================================================
 // Follow-on adapters — watch_strategy / config_provider kinds.
